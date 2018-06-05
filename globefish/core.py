@@ -183,10 +183,10 @@ class Request(threading.local):
                         self._DELETE[key] = raw_data[key].value
         return self._DELETE
 
-    @property
-    def DELETE(self):
-        self._DELETE = self.params
-        return self._DELETE
+    # @property
+    # def DELETE(self):
+    #     self._DELETE = self.params
+    #     return self._DELETE
 
     @property
     def params(self):
