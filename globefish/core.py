@@ -10,18 +10,14 @@ import Cookie
 import threading
 import time
 
+from globefish.router.common import Router
+from globefish.server.common import BaseServer
+from globefish.server.wsgiref_adaptor import WSGIRefServer
+
 try:
     from urlparse import parse_qs
 except ImportError:
     from cgi import parse_qs
-
-from jinja2 import Environment, FileSystemLoader
-from jinja2 import Template as jinja2_Template
-
-try:
-    from setting import TEMPLATE_DIRS
-except ImportError:
-    TEMPLATE_DIRS = 'templates'
 
 
 # 异常
@@ -29,9 +25,6 @@ except ImportError:
 class GlobefishException(Exception):
     pass
 
-
-class TemplateError(GlobefishException):
-    pass
 
 
 class HTTPError(GlobefishException):
@@ -275,87 +268,6 @@ class HeaderDict(dict):
             self[key] = [value]
 
 
-# 静态文件模块
-#####################################################################################
-def static_file(filename, root, mimetype='auto'):
-    """ 返回一个静态文件作为Response响应. """
-    root = os.path.abspath(root) + '/'
-    filename = os.path.normpath(filename).strip('/')
-    filename = os.path.join(root, filename)
-    headers = dict()
-
-    if not filename.startswith(root):
-        raise HTTPError(401, "Access denied.")
-    if not os.path.exists(filename) or not os.path.isfile(filename):
-        raise HTTPError(404, "File does not exist.")
-    if not os.access(filename, os.R_OK):
-        raise HTTPError(401, "You do not have permission to access this file.")
-
-    if mimetype == 'auto':
-        guess = mimetypes.guess_type(filename)[0]
-        if guess:
-            response.content_type = guess
-        elif mimetype:
-            response.content_type = mimetype
-    elif mimetype:
-        response.content_type = mimetype
-
-    stats = os.stat(filename)
-    if 'Content-Length' not in response.header:
-        response.header['Content-Length'] = stats.st_size
-    if 'Last-Modified' not in response.header:
-        ts = time.gmtime(stats.st_mtime)
-        ts = time.strftime("%a, %d %b %Y %H:%M:%S +0000", ts)
-        response.header['Last-Modified'] = ts
-
-    raise BreakTheGlobefish(open(filename, 'r'))
-
-
-# 路由模块
-#####################################################################################
-
-class Router(object):
-    @classmethod
-    def add_route(cls, url, handler, method='GET'):
-        method = method.strip().upper()
-        url = url.strip().lstrip('$^/ ').rstrip('$^ ')
-        if re.match(r'^(\w+/)*\w*$', url):
-            ROUTES_SIMPLE.setdefault(method, {})[url] = handler
-        else:
-            url = cls.compile_route(url)
-            ROUTES_REGEXP.setdefault(method, []).append([url, handler])
-
-    @classmethod
-    def route(cls, url, **kargs):
-        def wrapper(handler):
-            cls.add_route(url, handler, **kargs)
-            return handler
-
-        return wrapper
-
-    @classmethod
-    def compile_route(cls, route):
-        route = re.sub(r':([a-zA-Z_]+)(?P<uniq>[^\w/])(?P<re>.+?)(?P=uniq)', r'(?P<\1>\g<re>)', route)
-        route = re.sub(r':([a-zA-Z_]+)', r'(?P<\1>[^/]+)', route)
-        return re.compile('^%s$' % route)
-
-    @classmethod
-    def match_url(cls, url, method='GET'):
-
-        url = url.strip().lstrip("/ ")
-        route = ROUTES_SIMPLE.get(method, {}).get(url, None)
-        if route:
-            return (route, {})
-
-        routes = ROUTES_REGEXP.get(method, [])
-        for i in xrange(len(routes)):
-            match = routes[i][0].match(url)
-            if match:
-                handler = routes[i][1]
-                if i > 0:
-                    routes[i - 1], routes[i] = routes[i], routes[i - 1]
-                return (handler, match.groupdict())
-        return (None, None)
 
 
 # 错误处理
@@ -370,37 +282,6 @@ def error(code=500):
         set_error_handler(code, handler)
         return handler
     return wrapper
-
-
-# Server适配器
-######################################################################################################
-class BaseServer(object):
-    def __init__(self, host='127.0.0.1', port=8080, **kargs):
-        self.host = host
-        self.port = int(port)
-        self.options = kargs
-
-    def __repr__(self):
-        return "%s (%s:%d)" % (self.__class__.__name__, self.host, self.port)
-
-    def run(self, handler):
-        raise NotImplementedError
-
-
-class WSGIRefServer(BaseServer):
-    def run(self, handler):
-        from wsgiref.simple_server import make_server
-
-        server = make_server(self.host, self.port, handler)
-        server.serve_forever()
-
-
-class CherryPyServer(BaseServer):
-    def run(self, handler):
-        from cherrypy import wsgiserver
-
-        server = wsgiserver.CherryPyWSGIServer((self.host, self.port), handler)
-        server.start()
 
 
 def run(server=WSGIRefServer, host='127.0.0.1', port=8080, **kargs):
@@ -425,55 +306,12 @@ def run(server=WSGIRefServer, host='127.0.0.1', port=8080, **kargs):
         print("The End...")
 
 
-# 模板模块
-#####################################################################################
-
-# 基础模板类
-class BaseTemplate(object):
-    def __init__(self):
-        raise NotImplementedError
-
-    def load(self):
-        raise NotImplementedError
-
-    def render(self):
-        raise NotImplementedError
-
-
-# 模板类，基于jinja2
-class Template(BaseTemplate):
-    def __init__(self, template=None):
-        self.env = Environment(loader=FileSystemLoader(TEMPLATE_DIRS))
-        if template:
-            self.tmpl = jinja2_Template(template)
-
-    def load(self, template_name):
-        try:
-            self.tmpl = self.env.get_template(template_name)
-        except BaseException as e:
-            raise TemplateError("error in " + e.message)
-
-    def render(self, *args, **kwargs):
-        return str(self.tmpl.render(*args, **kwargs))
-
-
-# 模板的快捷使用方式
-def render_template(template_name, *args, **kwargs):
-    try:
-        tmpl = Template()
-        tmpl.load(template_name)
-        return tmpl.render(*args, **kwargs)
-    except BaseException as e:
-        raise TemplateError("error in " + e.message)
-
-
 # 初始化
 route = Router.route
 request = Request()
 response = Response()
 DEBUG = False
-ROUTES_SIMPLE = {}
-ROUTES_REGEXP = {}
+
 ERROR_HANDLER = {}
 HTTP_CODES = {
     100: 'CONTINUE',

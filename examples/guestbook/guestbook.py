@@ -2,6 +2,7 @@
 import datetime
 
 from globefish.core import *
+from globefish.template.common import render_template
 from models import *
 from globefish.utilities import init_db
 

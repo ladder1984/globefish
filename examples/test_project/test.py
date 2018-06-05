@@ -1,9 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
 from globefish.core import *
 # from peewee import *
 # from jinja2 import *
 import datetime
+
+from globefish.static.common import static_file
+from globefish.template.common import Template, render_template
 from models import *
 from globefish.utilities import init_db, redirect, abort
 from globefish.utilities import server_static

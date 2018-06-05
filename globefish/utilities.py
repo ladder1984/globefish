@@ -6,6 +6,9 @@ from globefish.core import *
 
 
 # 初始化models.py里的模块
+from globefish.static.common import static_file
+
+
 def init_db():
     try:
         from setting import database, database_type
